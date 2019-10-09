@@ -1,0 +1,19 @@
+### List and status of modules
+
+All modules available, planned, desired, etc. are listed in MODULES, including their status.
+
+### Creating the HTML
+
+To create the html for a given module:
+
+make data_nodes.html
+
+or see Makefile for shorthand names for each module; e.g.:
+
+make data_nodes
+
+This will create both a single page html and a multi-page (slides) version of the html. 
+
+### Creating and inserting figures into the Rmd
+
+see the howto file in the figures directory

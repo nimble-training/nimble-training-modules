@@ -1,0 +1,147 @@
+---
+title: "Programming with models (2): Inspecting model structure"
+subtitle: "NIMBLE training materials module"
+author: "NIMBLE Development Team"
+output:
+  html_document:
+    code_folding: show
+---
+
+```{r chunksetup, include=FALSE} 
+# include any code here you don't want to show up in the document,
+# e.g. package and dataset loading
+if(!('modules' %in% unlist(strsplit(getwd(), split = '/')))) setwd('modules')
+library(methods)  # otherwise new() not being found - weird
+library(nimble)
+read_chunk("chunks.R")
+```
+
+# Running example: the pump model
+
+We first need to build the model.
+
+```{r, pump-code}
+```
+
+```{r, pump-model}
+```
+
+```{r, pump-compile}
+```
+
+# Nodes and variables
+
+The parameters and data in a model are represented as nodes in a graph. Here we define some terms:
+
+ - parameter: an unknown quantity in the model that is represented as a random variable and will generally be estimated in an algorithm, e.g. `alpha` in the pump model
+ - data: a known quantity in a model, also represented as a random variable, e.g., `x[1], x[2], ...` in the pump model
+ - constants: other fixed quantities involved in the model, e.g., `N` in the pump model
+ - node: an element in the model representing data, parameter, or a deterministic quantity that is a function of other quantities in the model, e.g., `alpha` or `x[3]` in the pump model
+ - variable: a collection of one or more nodes with the same name, e.g., `alpha` or `x` in the pump model 
+
+# Inspecting the model: nodes
+
+NIMBLE provides users and programmers with the ability to get information about the nodes and variables in the model and the relationships amongst them.
+
+What are the nodes in the model? What are the dependencies of a given node (this is information used in many algorithms)?
+
+```{r, prep, echo=FALSE}
+# so attendees can run code below this without using code from other modules
+if(!exists('pump') || !exists('Cpump')) source('chunks.R')
+```                   
+
+```{r, model-nodes}
+pump$getNodeNames()
+hypers <- pump$getNodeNames(topOnly = TRUE)
+hypers
+pump$getDependencies(hypers)
+```
+
+There are a variety of options to `getNodeNames()` and `getDependencies` that allow you to fine-tune the information you get.
+
+```{r, get-info}
+args(pump$getDependencies)
+args(pump$getNodeNames)
+
+latents <- pump$getNodeNames(latentOnly = TRUE, stochOnly = TRUE)
+latents
+pump$getDependencies(latents, determOnly = TRUE)
+pump$getNodeNames(dataOnly = TRUE)
+```
+
+# Inspecting the model: variables
+
+What are the variables in the model? What information is available about them?
+
+```{r, model-vars}
+pump$getVarNames()
+pump$getVarInfo('theta')
+```
+
+As of the current version of NIMBLE, information about
+variables is not competely nicely arranged for a user (there aren't as
+many query functions), but it is available.
+
+This variable has 1 dimension (`nDim`), and its size is 10 (`maxs`).  Currently `mins` is always 1.  If at least one node within the variable is stochastic, then `anyStoch` will be `TRUE`.
+
+
+# The importance of querying a model: lifted nodes
+
+You may have noticed a strangely-named node, *lifted_d1_over_beta*, in the pump model. NIMBLE implements some features by inserting its own nodes.
+*You should never assume you know what nodes are in a model simply
+because you wrote the BUGS code.*
+
+Let's look at the two main ways this happens:
+
+```{r, fig.cap=""}
+m1 <- nimbleModel(
+    nimbleCode({
+        tau ~ dunif(0, 100)
+        x ~ dnorm(0, tau) #by default, tau is a precision
+    }))
+plot(m1$getGraph())
+m1$getNodeNames()
+```
+The node `lifted_d1_over_sqrt_oPtau_cP` has been inserted between
+`tau` and `x`.   The resulting model would equivalently have been
+created by this BUGS code:
+
+```{r, eval = FALSE}
+nimbleCode({
+    tau ~ dunif(0, 100)
+    lifted_d1_over_sqrt_oPtau_cP <- 1/sqrt(tau)
+    x ~ dnorm(0, sd = lifted_d1_over_sqrt_oPtau_cP) #by default, tau is a precision
+}))
+```
+
+NIMBLE has *lifted* the calculation of standard deviation from
+precision so that it is part of the model's graph.  Therefore *you
+will make a mistake if you assume that the dependencies of `tau`
+include only `x`*:
+
+```{r}
+m1$tau <- 3
+m1$x <- 1
+m1$calculate(c('tau','x')) ## Wrong: the lifted node is being neglected
+```
+
+The correct way to do this is with model-generic programming:
+```{r}
+m1$getDependencies('tau')
+m1$calculate( m1$getDependencies('tau') )
+```
+
+The second common situation that creates lifted nodes is:
+```{r, fig.cap=""}
+m2 <- nimbleModel(
+    nimbleCode({
+        a ~ dnorm(0, 1)
+        b ~ dnorm(a + 1, 1)
+    }))
+plot(m2$getGraph())
+m2$getNodeNames()
+```
+
+In this case, NIMBLE lifted the expression `a+1` and created a node
+for it.   Again the correct way to program is to query a model to
+learn about its nodes.  Do not assume you know what the nodes are.
